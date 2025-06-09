@@ -3,11 +3,10 @@
  * 
  * This file initializes the database connection and job processors
  * before starting the Express server.
- * Modified to work with or without Redis (for Render deployment)
  */
 
 const { PrismaClient } = require('@prisma/client');
-const { setupBullQueues, areQueuesAvailable } = require('./jobs/queueSetup');
+const { setupBullQueues } = require('./jobs/queueSetup');
 const { initializeDefaultSettings } = require('./controllers/settingsController');
 const server = require('./server');
 
@@ -29,20 +28,12 @@ async function connectToDatabase() {
 // Initialize job queues and processors
 async function initializeJobQueues() {
   try {
-    if (areQueuesAvailable()) {
-      await setupBullQueues();
-      console.log('Job queues initialized successfully');
-    } else {
-      console.log('Redis not available - running without job queues');
-      console.log('Scheduled messages will be processed by cron jobs');
-    }
+    await setupBullQueues();
+    console.log('Job queues initialized successfully');
     return true;
   } catch (error) {
     console.error('Failed to initialize job queues:', error);
-    // Don't fail the application startup if queues can't be initialized
-    // This allows the app to run without Redis on Render
-    console.log('Continuing without job queues');
-    return true;
+    return false;
   }
 }
 

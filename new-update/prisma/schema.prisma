@@ -1,0 +1,210 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// Lead model - stores all lead information
+model Lead {
+  id                String    @id @default(uuid())
+  leadId            String    @unique // External lead ID used in URLs
+  firstName         String
+  lastName          String?
+  email             String?
+  phone             String    // Phone number for SMS
+  status            LeadStatus @default(ACTIVE)
+  vehicleYear       Int?
+  vehicleMake       String?
+  city              String?
+  state             String?
+  zip               String?
+  savings           Int?      // Whole dollar amount of savings
+  timezone          String?   // Timezone for TCPA compliance
+  rawLeadData       Json      // Store the complete lead payload
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  
+  // Relations
+  messages          Message[]
+  calls             Call[]
+  clickEvents       ClickEvent[]
+  scheduledMessages ScheduledMessage[]
+  conversion        Conversion?
+}
+
+// Message model - stores all SMS messages sent and received
+model Message {
+  id          String       @id @default(uuid())
+  leadId      String
+  direction   MessageDirection
+  status      MessageStatus
+  body        String
+  errorMessage String?     // If message failed, store error
+  twilioSid   String?      // Twilio message SID
+  sentAt      DateTime?    // When message was sent to Twilio
+  deliveredAt DateTime?    // When message was delivered to recipient
+  createdAt   DateTime     @default(now())
+  
+  // Relations
+  lead        Lead         @relation(fields: [leadId], references: [id])
+}
+
+// Call model - stores all call information
+model Call {
+  id          String     @id @default(uuid())
+  leadId      String
+  agentId     String?    // ID of agent who made/received call
+  direction   CallDirection
+  status      CallStatus
+  duration    Int?       // Call duration in seconds
+  recordingUrl String?   // URL to call recording if available
+  twilioSid   String?    // Twilio call SID
+  startedAt   DateTime?  // When call was started
+  endedAt     DateTime?  // When call ended
+  createdAt   DateTime   @default(now())
+  
+  // Relations
+  lead        Lead       @relation(fields: [leadId], references: [id])
+}
+
+// ScheduledMessage model - stores scheduled follow-up messages
+model ScheduledMessage {
+  id          String     @id @default(uuid())
+  leadId      String
+  templateId  String
+  day         Int        // Day in sequence (0, 1, 3, 5, etc.)
+  variant     Int        // Template variant (1-6)
+  scheduledFor DateTime  // When message is scheduled to be sent
+  status      ScheduleStatus @default(PENDING)
+  jobId       String?    // BullMQ job ID
+  processedAt DateTime?  // When job was processed
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  
+  // Relations
+  lead        Lead       @relation(fields: [leadId], references: [id])
+  template    SmsTemplate @relation(fields: [templateId], references: [id])
+}
+
+// SmsTemplate model - stores SMS templates
+model SmsTemplate {
+  id          String     @id @default(uuid())
+  day         Int        // Day in sequence (0, 1, 3, 5, etc.)
+  variant     Int        // Template variant (1-6)
+  body        String     // Template body with placeholders
+  active      Boolean    @default(true)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  
+  // Relations
+  scheduledMessages ScheduledMessage[]
+  
+  // Unique constraint to ensure only one template per day/variant
+  @@unique([day, variant])
+}
+
+// ClickEvent model - tracks URL clicks
+model ClickEvent {
+  id          String     @id @default(uuid())
+  leadId      String
+  url         String     // Full URL clicked
+  userAgent   String?    // Browser user agent
+  ipAddress   String?    // IP address (consider privacy laws)
+  referrer    String?    // Referrer URL
+  clickedAt   DateTime   @default(now())
+  
+  // Relations
+  lead        Lead       @relation(fields: [leadId], references: [id])
+}
+
+// Conversion model - tracks lead conversions
+model Conversion {
+  id          String     @id @default(uuid())
+  leadId      String     @unique
+  amount      Float?     // Conversion amount if applicable
+  type        String?    // Type of conversion
+  data        Json?      // Additional conversion data
+  convertedAt DateTime   @default(now())
+  
+  // Relations
+  lead        Lead       @relation(fields: [leadId], references: [id])
+}
+
+// Settings model - stores system settings
+model Setting {
+  id          String     @id @default(uuid())
+  key         String     @unique
+  value       String
+  description String?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+}
+
+// User model - for admin users
+model User {
+  id          String     @id @default(uuid())
+  email       String     @unique
+  password    String
+  firstName   String?
+  lastName    String?
+  role        UserRole   @default(AGENT)
+  active      Boolean    @default(true)
+  lastLoginAt DateTime?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+}
+
+// Enums
+enum LeadStatus {
+  ACTIVE
+  OPTED_OUT
+  CONVERTED
+  ARCHIVED
+}
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum MessageStatus {
+  PENDING
+  SENT
+  DELIVERED
+  FAILED
+  RECEIVED
+}
+
+enum CallDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum CallStatus {
+  INITIATED
+  RINGING
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+  NO_ANSWER
+}
+
+enum ScheduleStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum UserRole {
+  ADMIN
+  MANAGER
+  AGENT
+}

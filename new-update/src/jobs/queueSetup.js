@@ -2,43 +2,20 @@
  * Queue Setup
  * 
  * Initializes and configures BullMQ queues for job processing
- * Modified to work with or without Redis (for Render deployment)
  */
 
+const { Queue, Worker, QueueScheduler } = require('bull');
 const { processSmsJob } = require('../services/smsService');
 const { processInboundMessage } = require('../services/inboundService');
 
-// Initialize queues as null
-let smsQueue = null;
-let inboundQueue = null;
-
-// Only require Bull and create queues if REDIS_URL is available
-if (process.env.REDIS_URL) {
-  const { Queue } = require('bull');
-  smsQueue = new Queue('sms-queue', process.env.REDIS_URL);
-  inboundQueue = new Queue('inbound-queue', process.env.REDIS_URL);
-  console.log('Redis queues initialized');
-} else {
-  console.log('Redis URL not found, running without job queues');
-}
+// Create queues
+const smsQueue = new Queue('sms-queue', process.env.REDIS_URL);
+const inboundQueue = new Queue('inbound-queue', process.env.REDIS_URL);
 
 /**
  * Setup BullMQ queues and workers
  */
 exports.setupBullQueues = async () => {
-  // If Redis is not available, return empty objects
-  if (!process.env.REDIS_URL) {
-    console.log('Redis not available, skipping queue setup');
-    return {
-      queues: {},
-      schedulers: {},
-      workers: {}
-    };
-  }
-
-  // Only import Bull components if Redis is available
-  const { Worker, QueueScheduler } = require('bull');
-  
   // Create queue schedulers (handles delayed jobs and retries)
   const smsQueueScheduler = new QueueScheduler('sms-queue', {
     connection: process.env.REDIS_URL
@@ -100,9 +77,5 @@ exports.setupBullQueues = async () => {
 };
 
 // Export the queues for use in other modules
-// If Redis is not available, these will be null
 exports.smsQueue = smsQueue;
 exports.inboundQueue = inboundQueue;
-
-// Export a helper function to check if queues are available
-exports.areQueuesAvailable = () => !!process.env.REDIS_URL;
