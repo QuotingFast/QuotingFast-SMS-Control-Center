@@ -9,7 +9,6 @@ const twilio = require('twilio');
 const dayjs = require('dayjs');
 const utc = require('dayjs/plugin/utc');
 const timezone = require('dayjs/plugin/timezone');
-const { Queue } = require('bull');
 const { truncateSmsContent } = require('../utils/smsUtils');
 const { isWithinTcpaHours } = require('../utils/tcpaUtils');
 
@@ -18,7 +17,13 @@ dayjs.extend(utc);
 dayjs.extend(timezone);
 
 const prisma = new PrismaClient();
-const smsQueue = new Queue('sms-queue', process.env.REDIS_URL);
+
+// Only initialize Queue if REDIS_URL is available
+let smsQueue;
+if (process.env.REDIS_URL) {
+  const { Queue } = require('bull');
+  smsQueue = new Queue('sms-queue', process.env.REDIS_URL);
+}
 
 // Initialize Twilio client
 const twilioClient = twilio(
@@ -89,26 +94,50 @@ exports.queueSmsMessage = async (leadId, day) => {
       }
     });
     
-    // Add to the BullMQ queue
-    const job = await smsQueue.add(
-      'send-sms',
-      {
-        scheduledMessageId: scheduledMessage.id
-      },
-      {
-        delay: scheduledFor.getTime() - Date.now(),
-        attempts: 2,
-        backoff: {
-          type: 'fixed',
-          delay: 300000 // 5 minutes in milliseconds
+    // If Redis is available, add to the BullMQ queue
+    // Otherwise, for Render deployment without Redis, we'll handle it differently
+    let jobId = `manual-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    
+    if (smsQueue) {
+      // Add to the BullMQ queue if available
+      const job = await smsQueue.add(
+        'send-sms',
+        {
+          scheduledMessageId: scheduledMessage.id
+        },
+        {
+          delay: scheduledFor.getTime() - Date.now(),
+          attempts: 2,
+          backoff: {
+            type: 'fixed',
+            delay: 300000 // 5 minutes in milliseconds
+          }
         }
+      );
+      
+      jobId = job.id.toString();
+      
+      // For day 0 messages (immediate), process right away if within TCPA hours
+      if (day === 0 && isWithinTcpaHours(lead)) {
+        // Process immediately for day 0
+        await exports.processSmsJob({ data: { scheduledMessageId: scheduledMessage.id } });
       }
-    );
+    } else {
+      console.log('Redis not available, scheduling without queue');
+      
+      // For day 0 messages (immediate), process right away if within TCPA hours
+      if (day === 0 && isWithinTcpaHours(lead)) {
+        // Process immediately for day 0
+        await exports.processSmsJob({ data: { scheduledMessageId: scheduledMessage.id } });
+      }
+      // For other days, we'll need to implement a different scheduling mechanism
+      // This could be a cron job that checks for scheduled messages
+    }
     
     // Update the scheduled message with the job ID
     await prisma.scheduledMessage.update({
       where: { id: scheduledMessage.id },
-      data: { jobId: job.id.toString() }
+      data: { jobId }
     });
     
     return scheduledMessage;

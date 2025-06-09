@@ -1,0 +1,80 @@
+services:
+  # Web service
+  - type: web
+    name: quotingfast-sms-control-center
+    runtime: node
+    buildCommand: npm install && npm run build
+    startCommand: node src/app.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 8080
+      - key: DATABASE_URL
+        fromDatabase:
+          name: quotingfast-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_EXPIRE
+        value: 30d
+      - key: TCPA_START_HOUR
+        value: 8
+      - key: TCPA_END_HOUR
+        value: 21
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_PHONE_NUMBER
+        sync: false
+      - key: APP_URL
+        value: https://quotingfast-sms-control-center.onrender.com
+      - key: REDIRECT_URL
+        value: https://quotingfast-sms-control-center.onrender.com/quote
+    
+  # Cron job for processing scheduled messages (runs every 5 minutes)
+  - type: cron
+    name: process-scheduled-messages
+    runtime: node
+    schedule: "*/5 * * * *"
+    buildCommand: npm install
+    startCommand: node src/cron/processScheduledMessages.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: quotingfast-db
+          property: connectionString
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_PHONE_NUMBER
+        sync: false
+      - key: TCPA_START_HOUR
+        value: 8
+      - key: TCPA_END_HOUR
+        value: 21
+
+  # Cron job for scheduling follow-ups (runs once daily)
+  - type: cron
+    name: schedule-followups
+    runtime: node
+    schedule: "0 1 * * *"
+    buildCommand: npm install
+    startCommand: node src/cron/scheduleFollowups.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: quotingfast-db
+          property: connectionString
+
+databases:
+  - name: quotingfast-db
+    databaseName: quotingfast
+    user: quotingfast_user
+    plan: free

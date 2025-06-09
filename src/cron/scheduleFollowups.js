@@ -2,7 +2,8 @@
 
 /**
  * Cron script to schedule follow-up messages for leads
- * Run this script once daily via IONOS cron
+ * Run this script once daily via cron
+ * Compatible with both IONOS and Render deployments
  */
 
 require('dotenv').config();
@@ -10,6 +11,7 @@ const { PrismaClient } = require('@prisma/client');
 const dayjs = require('dayjs');
 const utc = require('dayjs/plugin/utc');
 const timezone = require('dayjs/plugin/timezone');
+const smsService = require('../services/smsService');
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -43,48 +45,15 @@ async function scheduleFollowUpMessages() {
         if (FOLLOW_UP_DAYS.includes(daysSinceCreation)) {
           console.log(`Processing day ${daysSinceCreation} follow-up for lead ${lead.id}`);
           
-          // Get templates for this follow-up day
-          const templates = await prisma.template.findMany({
-            where: {
-              day: daysSinceCreation
-            }
-          });
-          
-          if (templates.length === 0) {
-            console.log(`No templates found for day ${daysSinceCreation}`);
-            continue;
+          // Use the smsService to queue the message
+          // This works with or without Redis
+          try {
+            const scheduledMessage = await smsService.queueSmsMessage(lead.id, daysSinceCreation);
+            console.log(`Scheduled day ${daysSinceCreation} message for lead ${lead.id}`, 
+              scheduledMessage ? `(ID: ${scheduledMessage.id})` : '(no message created)');
+          } catch (queueError) {
+            console.error(`Failed to queue message for lead ${lead.id} on day ${daysSinceCreation}:`, queueError);
           }
-          
-          // Select a random template variant
-          const randomIndex = Math.floor(Math.random() * templates.length);
-          const selectedTemplate = templates[randomIndex];
-          
-          // Replace placeholders in template
-          let messageContent = selectedTemplate.content;
-          messageContent = messageContent.replace(/{FirstName}/g, lead.firstName || 'there');
-          messageContent = messageContent.replace(/{LastName}/g, lead.lastName || '');
-          messageContent = messageContent.replace(/{LeadID}/g, lead.id);
-          messageContent = messageContent.replace(/{VehicleMake}/g, lead.vehicleMake || 'your vehicle');
-          messageContent = messageContent.replace(/{VehicleModel}/g, lead.vehicleModel || '');
-          messageContent = messageContent.replace(/{VehicleYear}/g, lead.vehicleYear || '');
-          messageContent = messageContent.replace(/{Savings}/g, lead.potentialSavings || '$XXX');
-          
-          // Calculate send time (default to 10 AM in lead's timezone)
-          const leadTimezone = lead.timezone || 'America/New_York';
-          const sendTime = dayjs().tz(leadTimezone).hour(10).minute(0).second(0);
-          
-          // Schedule the message
-          await prisma.scheduledMessage.create({
-            data: {
-              leadId: lead.id,
-              content: messageContent,
-              templateId: selectedTemplate.id,
-              scheduledTime: sendTime.toDate(),
-              status: 'PENDING'
-            }
-          });
-          
-          console.log(`Scheduled day ${daysSinceCreation} message for lead ${lead.id}`);
         }
       } catch (err) {
         console.error(`Error processing lead ${lead.id}:`, err);
